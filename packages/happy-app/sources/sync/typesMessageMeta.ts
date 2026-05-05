@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+export const MessageAttachmentSchema = z.object({
+    fileId: z.string(),
+    path: z.string(),
+    filename: z.string(),
+    mimeType: z.string().optional(),
+    size: z.number().optional()
+});
+
+export type MessageAttachment = z.infer<typeof MessageAttachmentSchema>;
+
 // Shared message metadata schema
 export const MessageMetaSchema = z.object({
     sentFrom: z.string().optional(), // Source identifier
@@ -10,7 +20,8 @@ export const MessageMetaSchema = z.object({
     appendSystemPrompt: z.string().nullable().optional(), // Append to system prompt for this message (null = reset)
     allowedTools: z.array(z.string()).nullable().optional(), // Allowed tools for this message (null = reset)
     disallowedTools: z.array(z.string()).nullable().optional(), // Disallowed tools for this message (null = reset)
-    displayText: z.string().optional() // Optional text to display in UI instead of actual message text
+    displayText: z.string().optional(), // Optional text to display in UI instead of actual message text
+    attachments: z.array(MessageAttachmentSchema).optional() // Files uploaded alongside this user message
 });
 
 export type MessageMeta = z.infer<typeof MessageMetaSchema>;

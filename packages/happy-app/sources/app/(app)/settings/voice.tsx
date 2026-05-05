@@ -31,6 +31,13 @@ export default React.memo(function VoiceSettingsScreen() {
     const [voiceAssistantLanguage] = useSettingMutable('voiceAssistantLanguage');
     const [voiceCustomAgentId, setVoiceCustomAgentId] = useSettingMutable('voiceCustomAgentId');
     const [voiceBypassToken, setVoiceBypassToken] = useSettingMutable('voiceBypassToken');
+    const [voiceSourceLanguage, setVoiceSourceLanguage] = useSettingMutable('voiceSourceLanguage');
+    const [voiceStopWord, setVoiceStopWord] = useSettingMutable('voiceStopWord');
+    const [voiceSonioxApiKey, setVoiceSonioxApiKey] = useSettingMutable('voiceSonioxApiKey');
+    const [voiceLlmCorrectionApiKey, setVoiceLlmCorrectionApiKey] = useSettingMutable('voiceLlmCorrectionApiKey');
+    const [voiceLlmCorrectionBaseUrl, setVoiceLlmCorrectionBaseUrl] = useSettingMutable('voiceLlmCorrectionBaseUrl');
+    const [voiceLlmCorrectionModel, setVoiceLlmCorrectionModel] = useSettingMutable('voiceLlmCorrectionModel');
+    const [voiceLlmCorrectionKeywords, setVoiceLlmCorrectionKeywords] = useSettingMutable('voiceLlmCorrectionKeywords');
     const [voiceUpsellOverride, setVoiceUpsellOverride] = useLocalSettingMutable('voiceUpsellOverride');
     const experiments = useSetting('experiments');
     const devModeEnabled = __DEV__ || useLocalSetting('devModeEnabled');
@@ -56,6 +63,21 @@ export default React.memo(function VoiceSettingsScreen() {
         trackPaywallButtonClicked('voluntary_support');
         await sync.presentPaywall('voluntary_support');
     }, []);
+
+    const promptString = React.useCallback(
+        async (title: string, current: string | null, placeholder?: string): Promise<string | null> => {
+            const value = await Modal.prompt(title, '', {
+                defaultValue: current ?? '',
+                placeholder,
+            });
+            if (value === null) return current;
+            const trimmed = value.trim();
+            return trimmed === '' ? null : trimmed;
+        },
+        [],
+    );
+
+    const isSonioxSelected = (voiceCustomAgentId ?? '').trim().toLowerCase() === 'soniox';
 
     const handleCustomAgentId = React.useCallback(async () => {
         const value = await Modal.prompt(
@@ -258,7 +280,7 @@ export default React.memo(function VoiceSettingsScreen() {
             </ItemGroup>
 
             {/* Prompt Guide — shown when custom agent is configured */}
-            {voiceCustomAgentId && (
+            {voiceCustomAgentId && !isSonioxSelected && (
                 <ItemGroup
                     title={t('settingsVoice.promptGuideTitle')}
                     footer={t('settingsVoice.promptGuideDescription')}
@@ -267,6 +289,92 @@ export default React.memo(function VoiceSettingsScreen() {
                         title={t('settingsVoice.customAgentId')}
                         subtitle={voiceCustomAgentId}
                         copy={voiceCustomAgentId}
+                    />
+                </ItemGroup>
+            )}
+
+            {/* Soniox Provider — active when voiceCustomAgentId === "soniox" */}
+            {isSonioxSelected && (
+                <ItemGroup
+                    title="Soniox STT"
+                    footer="Switch voice to Soniox speech-to-text. The transcript is sent to the active session as a single message; no live agent. Client connects directly to Soniox using your API key — no server proxy."
+                >
+                    <Item
+                        title="Soniox API Key"
+                        subtitle={voiceSonioxApiKey ? '•••' + voiceSonioxApiKey.slice(-4) : 'Not set'}
+                        icon={<Ionicons name="key-outline" size={29} color="#FF3B30" />}
+                        onPress={async () => {
+                            const v = await promptString('Soniox API key', voiceSonioxApiKey, 'sx-...');
+                            setVoiceSonioxApiKey(v);
+                        }}
+                    />
+                    <Item
+                        title="Source language"
+                        subtitle={voiceSourceLanguage ?? 'auto'}
+                        icon={<Ionicons name="language-outline" size={29} color="#34C759" />}
+                        onPress={async () => {
+                            const v = await promptString('Source language (e.g. en, vi, auto)', voiceSourceLanguage, 'auto');
+                            setVoiceSourceLanguage(v);
+                        }}
+                    />
+                    <Item
+                        title="Stop word"
+                        subtitle={voiceStopWord ?? 'Disabled'}
+                        icon={<Ionicons name="hand-left-outline" size={29} color="#FF9500" />}
+                        onPress={async () => {
+                            const v = await promptString('Stop word (e.g. "send", "stop")', voiceStopWord, 'send');
+                            setVoiceStopWord(v);
+                        }}
+                    />
+                </ItemGroup>
+            )}
+
+            {/* LLM Correction — usable with Soniox */}
+            {isSonioxSelected && (
+                <ItemGroup
+                    title="LLM correction"
+                    footer="Optional: when API key and model are set, the Soniox transcript is cleaned up through an OpenAI-compatible chat-completions API before sending. Base URL defaults to OpenAI. Keywords and the last 5 messages of the active session are passed as context to disambiguate proper nouns and references."
+                >
+                    <Item
+                        title="Base URL"
+                        subtitle={voiceLlmCorrectionBaseUrl ?? 'https://api.openai.com/v1 (default)'}
+                        icon={<Ionicons name="link-outline" size={29} color="#007AFF" />}
+                        onPress={async () => {
+                            const v = await promptString('OpenAI-compatible base URL', voiceLlmCorrectionBaseUrl, 'https://api.openai.com/v1');
+                            setVoiceLlmCorrectionBaseUrl(v);
+                        }}
+                    />
+                    <Item
+                        title="Model"
+                        subtitle={voiceLlmCorrectionModel ?? 'Not set'}
+                        icon={<Ionicons name="cube-outline" size={29} color="#007AFF" />}
+                        onPress={async () => {
+                            const v = await promptString('Model name', voiceLlmCorrectionModel, 'gpt-4o-mini');
+                            setVoiceLlmCorrectionModel(v);
+                        }}
+                    />
+                    <Item
+                        title="API Key"
+                        subtitle={voiceLlmCorrectionApiKey ? '•••' + voiceLlmCorrectionApiKey.slice(-4) : 'Not set'}
+                        icon={<Ionicons name="key-outline" size={29} color="#FF3B30" />}
+                        onPress={async () => {
+                            const v = await promptString('API key', voiceLlmCorrectionApiKey, 'sk-...');
+                            setVoiceLlmCorrectionApiKey(v);
+                        }}
+                    />
+                    <Item
+                        title="Keywords"
+                        subtitle={voiceLlmCorrectionKeywords ?? 'None'}
+                        subtitleLines={0}
+                        icon={<Ionicons name="pricetags-outline" size={29} color="#34C759" />}
+                        onPress={async () => {
+                            const v = await promptString(
+                                'Correction keywords',
+                                voiceLlmCorrectionKeywords,
+                                'e.g. Soniox, ElevenLabs, Claude, Codex, Tri',
+                            );
+                            setVoiceLlmCorrectionKeywords(v);
+                        }}
                     />
                 </ItemGroup>
             )}

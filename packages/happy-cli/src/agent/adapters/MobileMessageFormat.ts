@@ -19,6 +19,19 @@ export type MobileAgentType = 'gemini' | 'codex' | 'claude' | 'opencode';
 export type MobileMessageRole = 'user' | 'agent';
 
 /**
+ * Attachment metadata for files uploaded by mobile and stored locally on
+ * the same machine where the CLI runs. Path is absolute and ready for
+ * direct read by the agent.
+ */
+export interface MobileAttachment {
+  fileId: string;
+  path: string;
+  filename: string;
+  mimeType?: string;
+  size?: number;
+}
+
+/**
  * Message metadata sent with each message
  */
 export interface MobileMessageMeta {
@@ -28,6 +41,8 @@ export interface MobileMessageMeta {
   permissionMode?: string;
   /** Model name if applicable */
   model?: string | null;
+  /** Files uploaded alongside this user message (CLI-side: absolute paths on local fs) */
+  attachments?: MobileAttachment[];
 }
 
 /**

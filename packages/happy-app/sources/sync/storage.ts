@@ -32,6 +32,7 @@ import { isMutableTool } from "@/components/tools/knownTools";
 import { projectManager } from "./projectManager";
 import { DecryptedArtifact } from "./artifactTypes";
 import { FeedItem } from "./feedTypes";
+import type { MessageAttachment } from "./typesMessageMeta";
 
 // Debounce timer for realtimeMode changes
 let realtimeModeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -145,6 +146,7 @@ interface StorageState {
     purchases: Purchases;
     profile: Profile;
     sessions: Record<string, Session>;
+    pendingAttachments: Record<string, MessageAttachment[]>;  // sessionId -> attachments staged for next send (not persisted)
     sessionsData: SessionListItem[] | null;  // Legacy - to be removed
     sessionListViewData: SessionListViewItem[] | null;
     sessionMessages: Record<string, SessionMessages>;
@@ -196,6 +198,9 @@ interface StorageState {
     setSocketStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => void;
     getActiveSessions: () => Session[];
     updateSessionDraft: (sessionId: string, draft: string | null) => void;
+    addPendingAttachment: (sessionId: string, attachment: MessageAttachment) => void;
+    removePendingAttachment: (sessionId: string, fileId: string) => void;
+    clearPendingAttachments: (sessionId: string) => void;
     updateSessionPermissionMode: (sessionId: string, mode: string) => void;
     updateSessionModelMode: (sessionId: string, mode: string) => void;
     updateSessionEffortLevel: (sessionId: string, level: string) => void;
@@ -343,6 +348,7 @@ export const storage = create<StorageState>()((set, get) => {
         purchases,
         profile,
         sessions: {},
+        pendingAttachments: {},
         machines: {},
         artifacts: {},  // Initialize artifacts
         friends: {},  // Initialize relationships cache
@@ -957,6 +963,31 @@ export const storage = create<StorageState>()((set, get) => {
                 sessionListViewData: buildSessionListViewData(updatedSessions)
             };
         }),
+        addPendingAttachment: (sessionId: string, attachment: MessageAttachment) => set((state) => ({
+            ...state,
+            pendingAttachments: {
+                ...state.pendingAttachments,
+                [sessionId]: [...(state.pendingAttachments[sessionId] ?? []), attachment]
+            }
+        })),
+        removePendingAttachment: (sessionId: string, fileId: string) => set((state) => {
+            const current = state.pendingAttachments[sessionId];
+            if (!current || current.length === 0) return state;
+            const next = current.filter((a) => a.fileId !== fileId);
+            const pendingAttachments = { ...state.pendingAttachments };
+            if (next.length === 0) {
+                delete pendingAttachments[sessionId];
+            } else {
+                pendingAttachments[sessionId] = next;
+            }
+            return { ...state, pendingAttachments };
+        }),
+        clearPendingAttachments: (sessionId: string) => set((state) => {
+            if (!state.pendingAttachments[sessionId]) return state;
+            const pendingAttachments = { ...state.pendingAttachments };
+            delete pendingAttachments[sessionId];
+            return { ...state, pendingAttachments };
+        }),
         updateSessionPermissionMode: (sessionId: string, mode: string) => set((state) => {
             const session = state.sessions[sessionId];
             if (!session) return state;
@@ -1340,6 +1371,11 @@ export function useSessions() {
 
 export function useSession(id: string): Session | null {
     return storage(useShallow((state) => state.sessions[id] ?? null));
+}
+
+const emptyAttachments: MessageAttachment[] = [];
+export function usePendingAttachments(sessionId: string): MessageAttachment[] {
+    return storage(useShallow((state) => state.pendingAttachments[sessionId] ?? emptyAttachments));
 }
 
 const emptyArray: unknown[] = [];

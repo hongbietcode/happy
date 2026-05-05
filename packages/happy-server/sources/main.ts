@@ -10,6 +10,7 @@ import { startDatabaseMetricsUpdater } from "@/app/monitoring/metrics2";
 import { initEncrypt } from "./modules/encrypt";
 import { initGithub } from "./modules/github";
 import { loadFiles } from "./storage/files";
+import { startSessionFilesCleanup } from "./app/sessionFiles/sessionFilesCleanup";
 
 async function main() {
 
@@ -41,6 +42,7 @@ async function main() {
     await startMetricsServer();
     startDatabaseMetricsUpdater();
     startTimeout();
+    startSessionFilesCleanup();
 
     //
     // Ready

@@ -2,6 +2,7 @@ import { buildNewMessageUpdate, eventRouter } from "@/app/events/eventRouter";
 import { dispatchNewMessagePush } from "@/app/push/pushDispatch";
 import { db } from "@/storage/db";
 import { allocateSessionSeqBatch, allocateUserSeq } from "@/storage/seq";
+import { saveSessionFile } from "@/storage/sessionFiles";
 import { randomKeyNaked } from "@/utils/randomKeyNaked";
 import { z } from "zod";
 import { type Fastify } from "../types";
@@ -223,6 +224,51 @@ export function v3SessionRoutes(app: Fastify) {
 
         return reply.send({
             messages: txResult.responseMessages.map(toSendResponseMessage)
+        });
+    });
+
+    app.post('/v3/sessions/:sessionId/files', {
+        preHandler: app.authenticate,
+        schema: {
+            params: z.object({
+                sessionId: z.string()
+            })
+        }
+    }, async (request, reply) => {
+        const userId = request.userId;
+        const { sessionId } = request.params;
+
+        const session = await db.session.findFirst({
+            where: {
+                id: sessionId,
+                accountId: userId
+            },
+            select: { id: true }
+        });
+
+        if (!session) {
+            return reply.code(404).send({ error: 'Session not found' });
+        }
+
+        const data = await request.file();
+        if (!data) {
+            return reply.code(400).send({ error: 'No file uploaded' });
+        }
+
+        const buf = await data.toBuffer();
+        const saved = await saveSessionFile(
+            sessionId,
+            buf,
+            data.filename || 'upload.bin',
+            data.mimetype
+        );
+
+        return reply.send({
+            fileId: saved.fileId,
+            path: saved.path,
+            filename: saved.filename,
+            mimeType: data.mimetype,
+            size: saved.size
         });
     });
 }

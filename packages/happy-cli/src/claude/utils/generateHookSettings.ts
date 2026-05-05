@@ -13,16 +13,20 @@ import { projectPath } from '@/projectPath';
 
 /**
  * Generate a temporary settings file with SessionStart hook configuration
- * 
+ *
  * @param port - The port where Happy server is listening
+ * @param sessionTag - Unique session identifier used to name the file stably across
+ *                     Claude session forks (e.g. /compact), avoiding stale-PID errors
+ *                     when happy restarts or is killed mid-session.
  * @returns Path to the generated settings file
  */
-export function generateHookSettingsFile(port: number): string {
+export function generateHookSettingsFile(port: number, sessionTag: string): string {
     const hooksDir = join(configuration.happyHomeDir, 'tmp', 'hooks');
     mkdirSync(hooksDir, { recursive: true });
 
-    // Unique filename per process to avoid conflicts
-    const filename = `session-hook-${process.pid}.json`;
+    // Session-scoped filename: stable for the lifetime of this happy invocation so
+    // Claude Code can always find it on session forks (/compact, resume, etc.).
+    const filename = `session-hook-${sessionTag}.json`;
     const filepath = join(hooksDir, filename);
 
     // Path to the hook forwarder script

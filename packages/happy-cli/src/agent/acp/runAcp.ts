@@ -841,7 +841,12 @@ export async function runAcp(opts: {
       logger.debug(`[${opts.agentName}] Requested ACP model: ${currentModel ?? 'null'}`);
     }
 
-    messageQueue.push(message.content.text, {
+    const attachments = message.meta?.attachments;
+    const messageText = (attachments && attachments.length > 0)
+      ? `${message.content.text}\n\nThe user attached ${attachments.length === 1 ? 'a file' : `${attachments.length} files`}. Use the Read tool to view ${attachments.length === 1 ? 'it' : 'them'}:\n${attachments.map((a) => `- ${a.path}`).join('\n')}`
+      : message.content.text;
+
+    messageQueue.push(messageText, {
       permissionMode: currentPermissionMode,
       model: currentModel,
     });

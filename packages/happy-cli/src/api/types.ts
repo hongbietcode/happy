@@ -184,6 +184,21 @@ export type Machine = {
 }
 
 /**
+ * Attachment metadata schema (file uploaded by mobile, stored on the local
+ * server filesystem; CLI receives only the absolute path and reads it
+ * directly via the agent's file-read tool).
+ */
+export const MessageAttachmentSchema = z.object({
+  fileId: z.string(),
+  path: z.string(),
+  filename: z.string(),
+  mimeType: z.string().optional(),
+  size: z.number().optional()
+})
+
+export type MessageAttachment = z.infer<typeof MessageAttachmentSchema>
+
+/**
  * Message metadata schema
  */
 export const MessageMetaSchema = z.object({
@@ -194,7 +209,8 @@ export const MessageMetaSchema = z.object({
   customSystemPrompt: z.string().nullable().optional(), // Custom system prompt for this message (null = reset)
   appendSystemPrompt: z.string().nullable().optional(), // Append to system prompt for this message (null = reset)
   allowedTools: z.array(z.string()).nullable().optional(), // Allowed tools for this message (null = reset)
-  disallowedTools: z.array(z.string()).nullable().optional() // Disallowed tools for this message (null = reset)
+  disallowedTools: z.array(z.string()).nullable().optional(), // Disallowed tools for this message (null = reset)
+  attachments: z.array(MessageAttachmentSchema).optional() // Files uploaded alongside this user message
 })
 
 export type MessageMeta = z.infer<typeof MessageMetaSchema>

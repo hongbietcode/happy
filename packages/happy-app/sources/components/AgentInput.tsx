@@ -2,9 +2,6 @@ import { Ionicons, Octicons } from '@expo/vector-icons';
 import * as React from 'react';
 import { View, Platform, useWindowDimensions, ViewStyle, Text, ActivityIndicator, TouchableWithoutFeedback, Image as RNImage, Pressable } from 'react-native';
 import { Image } from 'expo-image';
-import { AgentInputAttachmentStrip } from './AgentInputAttachmentStrip';
-import type { AttachmentPreview } from '@/sync/attachmentTypes';
-import { generateThumbhash } from '@/utils/thumbhash';
 import { layout } from './layout';
 import { MultiTextInput, KeyPressEvent } from './MultiTextInput';
 import { Typography } from '@/constants/Typography';
@@ -26,6 +23,7 @@ import { hackMode, hackModes } from '@/sync/modeHacks';
 import { Theme } from '@/theme';
 import { t } from '@/text';
 import { Metadata } from '@/sync/storageTypes';
+import type { MessageAttachment } from '@/sync/typesMessageMeta';
 
 interface AgentInputProps {
     value: string;
@@ -80,12 +78,11 @@ interface AgentInputProps {
     isSendDisabled?: boolean;
     isSending?: boolean;
     minHeight?: number;
-    zenMode?: boolean;
-    /** Image attachments waiting to be sent (expImageUpload feature). */
-    selectedImages?: AttachmentPreview[];
-    onPickImages?: () => void;
-    onRemoveImage?: (id: string) => void;
-    onAddImages?: (images: AttachmentPreview[]) => void;
+    attachments?: MessageAttachment[];
+    attachmentThumbs?: Record<string, string>; // fileId -> local uri to render as thumbnail
+    onPickImage?: () => void;
+    onRemoveAttachment?: (fileId: string) => void;
+    isAttaching?: boolean;
 }
 
 const MAX_CONTEXT_SIZE = 190000;
@@ -317,10 +314,9 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const isSendBlocked = props.blockSend ?? false;
 
     const hasText = props.value.trim().length > 0;
-    const hasImages = (props.selectedImages?.length ?? 0) > 0;
     const canPressSendButton = !props.isSending
         && !props.isSendDisabled
-        && (isSendBlocked ? (hasText || hasImages) : (hasText || hasImages || !!props.onMicPress));
+        && (isSendBlocked ? hasText : (hasText || !!props.onMicPress));
 
     // Check if this is a Codex, Gemini, or OpenClaw session
     // Use metadata.flavor for existing sessions, agentType prop for new sessions
@@ -376,40 +372,6 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
     // Forward ref to the MultiTextInput
     React.useImperativeHandle(ref, () => inputRef.current!, []);
-
-    // Web paste/drag — intercept image pastes and drops for the attachment feature
-    React.useEffect(() => {
-        if (Platform.OS !== 'web' || !props.onAddImages) return;
-
-        const handlePaste = async (e: ClipboardEvent) => {
-            // Only handle pastes targeted at a focused text-editable element.
-            // The listener is attached to document, so without this guard a
-            // paste in the URL bar, another modal, or any focused-elsewhere
-            // input would steal images intended for somewhere else.
-            const active = document.activeElement;
-            const isEditableTarget = active instanceof HTMLInputElement
-                || active instanceof HTMLTextAreaElement
-                || (active instanceof HTMLElement && active.isContentEditable);
-            if (!isEditableTarget) return;
-
-            const { getImagesFromClipboard, fileToAttachmentPreview } = await import('@/utils/pasteImages.web');
-            const files = getImagesFromClipboard(e);
-            if (!files.length) return;
-            e.preventDefault();
-            const previews = (await Promise.all(
-                files.map((f) => fileToAttachmentPreview(f, generateThumbhash))
-            )).filter(Boolean) as Omit<AttachmentPreview, 'id'>[];
-            if (previews.length) {
-                props.onAddImages!(previews.map((p) => ({
-                    ...p,
-                    id: `paste_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                })));
-            }
-        };
-
-        document.addEventListener('paste', handlePaste as any);
-        return () => document.removeEventListener('paste', handlePaste as any);
-    }, [props.onAddImages]);
 
     // Autocomplete state - track text and selection together
     const [inputState, setInputState] = React.useState<TextInputState>({
@@ -523,12 +485,12 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         if (props.isSendDisabled || props.isSending) return;
 
         hapticsLight();
-        if (hasText || hasImages) {
+        if (hasText) {
             props.onSend();
         } else {
             props.onMicPress?.();
         }
-    }, [handleBlockedSendAttempt, hasText, hasImages, isSendBlocked, props]);
+    }, [handleBlockedSendAttempt, hasText, isSendBlocked, props]);
 
     // Handle keyboard navigation
     const handleKeyPress = React.useCallback((event: KeyPressEvent): boolean => {
@@ -883,7 +845,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 )}
 
                 {/* Connection status, context warning, and permission mode */}
-                {(props.connectionStatus || contextWarning || (displayPermissionMode && permissionModeKey !== 'default' && !props.zenMode)) && (
+                {(props.connectionStatus || contextWarning || (displayPermissionMode && permissionModeKey !== 'default')) && (
                     <View style={{
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -990,7 +952,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             )}
                         </View>
                         {/* Permission badge — only shown when non-default */}
-                        {displayPermissionMode && permissionModeKey !== 'default' && !props.zenMode && (() => {
+                        {displayPermissionMode && permissionModeKey !== 'default' && (() => {
                             const permColor = isSandboxedYoloMode ? '#4169E1' :
                                 permissionModeKey === 'acceptEdits' ? theme.colors.permission.acceptEdits :
                                     permissionModeKey === 'bypassPermissions' ? theme.colors.permission.bypass :
@@ -1102,12 +1064,76 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 {/* Box 2: Action Area (Input + Send) */}
                 <Shaker ref={sendBlockShakerRef}>
                 <View style={styles.unifiedPanel}>
-                    {/* Attachment preview strip */}
-                    {props.selectedImages && props.selectedImages.length > 0 && (
-                        <AgentInputAttachmentStrip
-                            images={props.selectedImages}
-                            onRemove={props.onRemoveImage ?? (() => {})}
-                        />
+                    {/* Attachments thumbnail strip */}
+                    {props.attachments && props.attachments.length > 0 && (
+                        <View style={{
+                            flexDirection: 'row',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                            paddingHorizontal: 8,
+                            paddingTop: 6,
+                            paddingBottom: 2,
+                        }}>
+                            {props.attachments.map((att) => {
+                                const localUri = props.attachmentThumbs?.[att.fileId];
+                                return (
+                                    <View
+                                        key={att.fileId}
+                                        style={{
+                                            width: 56,
+                                            height: 56,
+                                            borderRadius: 10,
+                                            overflow: 'hidden',
+                                            position: 'relative',
+                                            backgroundColor: theme.colors.surfacePressed,
+                                        }}
+                                    >
+                                        {localUri ? (
+                                            <RNImage
+                                                source={{ uri: localUri }}
+                                                style={{ width: '100%', height: '100%' }}
+                                                resizeMode="cover"
+                                            />
+                                        ) : (
+                                            <View style={{
+                                                flex: 1,
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                            }}>
+                                                <Ionicons
+                                                    name="image-outline"
+                                                    size={22}
+                                                    color={theme.colors.textSecondary}
+                                                />
+                                            </View>
+                                        )}
+                                        {props.onRemoveAttachment && (
+                                            <Pressable
+                                                onPress={() => {
+                                                    hapticsLight();
+                                                    props.onRemoveAttachment?.(att.fileId);
+                                                }}
+                                                hitSlop={6}
+                                                style={(p) => ({
+                                                    position: 'absolute',
+                                                    top: 2,
+                                                    right: 2,
+                                                    backgroundColor: 'rgba(0,0,0,0.55)',
+                                                    width: 18,
+                                                    height: 18,
+                                                    borderRadius: 9,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    opacity: p.pressed ? 0.7 : 1,
+                                                })}
+                                            >
+                                                <Ionicons name="close" size={12} color="#fff" />
+                                            </Pressable>
+                                        )}
+                                    </View>
+                                );
+                            })}
+                        </View>
                     )}
                     {/* Input field */}
                     <View style={[styles.inputContainer, props.minHeight ? { minHeight: props.minHeight } : undefined]}>
@@ -1129,8 +1155,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         <View style={{ flexDirection: 'column', flex: 1, gap: 2 }}>
                             {/* Row 1: Settings, Profile (FIRST), Agent, Abort, Git Status */}
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                {props.zenMode && <View style={{ flex: 1 }} />}
-                                {!props.zenMode && <View style={styles.actionButtonsLeft}>
+                                <View style={styles.actionButtonsLeft}>
 
                                 {/* Settings button */}
                                 {props.onPermissionModeChange && (
@@ -1153,6 +1178,42 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                             size={16}
                                             color={theme.colors.button.secondary.tint}
                                         />
+                                    </Pressable>
+                                )}
+
+                                {/* Attach image button */}
+                                {props.onPickImage && (
+                                    <Pressable
+                                        onPress={() => {
+                                            if (props.isAttaching) return;
+                                            hapticsLight();
+                                            props.onPickImage?.();
+                                        }}
+                                        hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
+                                        disabled={props.isAttaching}
+                                        style={(p) => ({
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            borderRadius: Platform.select({ default: 16, android: 20 }),
+                                            paddingHorizontal: 8,
+                                            paddingVertical: 6,
+                                            justifyContent: 'center',
+                                            height: 32,
+                                            opacity: p.pressed || props.isAttaching ? 0.7 : 1,
+                                        })}
+                                    >
+                                        {props.isAttaching ? (
+                                            <ActivityIndicator
+                                                size="small"
+                                                color={theme.colors.button.secondary.tint}
+                                            />
+                                        ) : (
+                                            <Ionicons
+                                                name="attach-outline"
+                                                size={18}
+                                                color={theme.colors.button.secondary.tint}
+                                            />
+                                        )}
                                     </Pressable>
                                 )}
 
@@ -1228,33 +1289,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
                                 {/* Git Status Badge */}
                                 <GitStatusButton sessionId={props.sessionId} onPress={props.onFileViewerPress} />
-
-                                {/* Image picker button (expImageUpload) */}
-                                {props.onPickImages && (
-                                    <Pressable
-                                        onPress={props.onPickImages}
-                                        hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
-                                        style={(p) => ({
-                                            flexDirection: 'row',
-                                            alignItems: 'center',
-                                            borderRadius: Platform.select({ default: 16, android: 20 }),
-                                            paddingHorizontal: 8,
-                                            paddingVertical: 6,
-                                            justifyContent: 'center',
-                                            height: 32,
-                                            opacity: p.pressed ? 0.7 : 1,
-                                        })}
-                                    >
-                                        <Ionicons
-                                            name="image-outline"
-                                            size={16}
-                                            color={(props.selectedImages?.length ?? 0) > 0
-                                                ? theme.colors.radio.active
-                                                : theme.colors.button.secondary.tint}
-                                        />
-                                    </Pressable>
-                                )}
-                                </View>}
+                                </View>
 
                                 {/* Send/Voice button - aligned with first row */}
                                 <View

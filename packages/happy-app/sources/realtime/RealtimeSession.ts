@@ -6,6 +6,7 @@ import { TokenStorage } from '@/auth/tokenStorage';
 import { t } from '@/text';
 import { requestMicrophonePermission, showMicrophonePermissionDeniedAlert } from '@/utils/microphonePermissions';
 import { storage } from '@/sync/storage';
+import { getSonioxVoiceSession } from './soniox/soniox-realtime-session';
 import {
     getVoiceMessageCount,
     getVoiceOnboardingPromptLoadCount,
@@ -17,6 +18,7 @@ import { buildVoiceFirstMessage, buildVoiceSystemPrompt } from './voiceSystemPro
 import { getVoiceUpsellVariant } from './voiceExperiment';
 
 let voiceSession: VoiceSession | null = null;
+let elevenLabsSession: VoiceSession | null = null;
 let voiceSessionStarted: boolean = false;
 let currentSessionId: string | null = null;
 let currentVoiceConversationId: string | null = null;
@@ -29,7 +31,15 @@ export async function startRealtimeSession(sessionId: string, initialContext?: s
     currentVoiceConversationId = null;
     currentVoiceSessionStartedAt = null;
 
-    if (!voiceSession) {
+    const sonioxSelected = (() => {
+        const id = storage.getState().settings.voiceCustomAgentId;
+        return !!id && id.trim().toLowerCase() === 'soniox';
+    })();
+    // Restore ElevenLabs impl if a previous Soniox run swapped it out.
+    if (!sonioxSelected && elevenLabsSession) {
+        voiceSession = elevenLabsSession;
+    }
+    if (!voiceSession && !sonioxSelected) {
         console.warn('No voice session registered');
         return null;
     }
@@ -47,8 +57,29 @@ export async function startRealtimeSession(sessionId: string, initialContext?: s
     }
 
     try {
-        // Bypass Happy server token — only when user has their own custom agent
+        // Soniox flow — switch provider when voiceCustomAgentId === 'soniox'.
+        // Skip ElevenLabs token fetch entirely; the Soniox session opens its own
+        // WS to /v1/voice/soniox using the user's bearer token.
         const { voiceBypassToken, voiceCustomAgentId } = storage.getState().settings;
+        if (voiceCustomAgentId && voiceCustomAgentId.trim().toLowerCase() === 'soniox') {
+            console.log('[Voice] Using Soniox provider');
+            currentSessionId = sessionId;
+            const sonioxSession = getSonioxVoiceSession();
+            voiceSession = sonioxSession;
+            await sonioxSession.startSession({ sessionId, initialContext });
+            currentVoiceConversationId = null;
+            currentVoiceSessionStartedAt = Date.now();
+            voiceSessionStarted = true;
+            return null;
+        }
+
+        if (!voiceSession) {
+            // Should not happen — we checked above. Narrow for TS.
+            console.warn('No ElevenLabs voice session registered');
+            storage.getState().setRealtimeStatus('disconnected');
+            return null;
+        }
+
         if (voiceBypassToken && voiceCustomAgentId) {
             console.log('[Voice] Bypassing token, custom agent ID:', voiceCustomAgentId);
             currentSessionId = sessionId;
@@ -178,6 +209,7 @@ export function registerVoiceSession(session: VoiceSession) {
         console.warn('Voice session already registered, replacing with new one');
     }
     voiceSession = session;
+    elevenLabsSession = session;
 }
 
 export function isVoiceSessionStarted(): boolean {
